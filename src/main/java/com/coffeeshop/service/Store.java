@@ -145,6 +145,25 @@ public class Store {
         } catch (Exception ignored) {}
     }
 
+    // Reload inventory from disk (called by other processes via file-watch)
+    public void reloadInventoryFromDisk() {
+        try {
+            Map<String, InventoryItem> persisted = PersistenceManager.loadInventory();
+            if (persisted != null) {
+                inventory.clear();
+                inventory.putAll(persisted);
+                notifyInventoryListeners();
+            }
+        } catch (Exception ignored) {}
+    }
+
+    // Reload all data from disk (products, inventory, categories, etc.)
+    public void reloadAllDataFromDisk() {
+        reloadProductsFromDisk();
+        reloadInventoryFromDisk();
+        reloadCategoriesFromDisk();
+    }
+
     // Cashier account management
     public java.util.List<com.coffeeshop.model.CashierAccount> getCashiers() {
         return new java.util.ArrayList<>(cashiers);
@@ -245,7 +264,17 @@ public class Store {
     }
 
     public InventoryItem getInventoryItem(String name) {
-        return inventory.get(name);
+        // First try exact match
+        InventoryItem item = inventory.get(name);
+        if (item != null) return item;
+        
+        // Try case-insensitive match
+        for (Map.Entry<String, InventoryItem> entry : inventory.entrySet()) {
+            if (entry.getKey().equalsIgnoreCase(name)) {
+                return entry.getValue();
+            }
+        }
+        return null;
     }
 
     public void refillInventory(String itemName, double amount) {
@@ -456,11 +485,25 @@ public class Store {
                     double requiredAmount = entry.getValue() * item.getQuantity();
                     requiredIngredients.merge(ingredientName, requiredAmount, Double::sum);
                 }
+            } else {
+                // Product not found by ID - use the recipe from the order item's product directly
+                Product orderProduct = item.getProduct();
+                if (orderProduct != null && orderProduct.getRecipe() != null) {
+                    for (Map.Entry<String, Double> entry : orderProduct.getRecipe().entrySet()) {
+                        String ingredientName = entry.getKey();
+                        double requiredAmount = entry.getValue() * item.getQuantity();
+                        requiredIngredients.merge(ingredientName, requiredAmount, Double::sum);
+                    }
+                }
             }
         }
 
         for (Map.Entry<String, Double> entry : requiredIngredients.entrySet()) {
-            InventoryItem item = inventory.get(entry.getKey());
+            // Use case-insensitive lookup
+            InventoryItem item = getInventoryItem(entry.getKey());
+            System.out.println("[DEBUG] isInventorySufficient - ingredient: " + entry.getKey() + 
+                             ", required: " + entry.getValue() + 
+                             ", available: " + (item != null ? item.getQuantity() : "NULL"));
             if (item == null || !item.isSufficient(entry.getValue())) {
                 return false;
             }
@@ -480,11 +523,25 @@ public class Store {
                     double requiredAmount = entry.getValue() * item.getQuantity();
                     requiredIngredients.merge(ingredientName, requiredAmount, Double::sum);
                 }
+            } else {
+                // Product not found - use the recipe from the order item's product directly
+                Product orderProduct = item.getProduct();
+                if (orderProduct != null && orderProduct.getRecipe() != null) {
+                    for (Map.Entry<String, Double> entry : orderProduct.getRecipe().entrySet()) {
+                        String ingredientName = entry.getKey();
+                        double requiredAmount = entry.getValue() * item.getQuantity();
+                        requiredIngredients.merge(ingredientName, requiredAmount, Double::sum);
+                    }
+                }
             }
         }
 
         for (Map.Entry<String, Double> entry : requiredIngredients.entrySet()) {
-            InventoryItem item = inventory.get(entry.getKey());
+            // Use case-insensitive lookup
+            InventoryItem item = getInventoryItem(entry.getKey());
+            System.out.println("[DEBUG] Checking ingredient: " + entry.getKey() + 
+                             ", required: " + entry.getValue() + 
+                             ", available: " + (item != null ? item.getQuantity() : "NULL"));
             if (item == null || !item.isSufficient(entry.getValue())) {
                 return entry.getKey();
             }
@@ -513,7 +570,8 @@ public class Store {
         }
 
         for (Map.Entry<String, Double> entry : requiredIngredients.entrySet()) {
-            InventoryItem item = inventory.get(entry.getKey());
+            // Use case-insensitive lookup
+            InventoryItem item = getInventoryItem(entry.getKey());
             if (item != null) {
                 item.deduct(entry.getValue());
             }

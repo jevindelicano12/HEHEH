@@ -1057,7 +1057,7 @@ public class CustomerApp extends Application {
         } catch (Exception ignored) {}
     }
 
-    // Start a background WatchService that watches data/categories.json and reloads categories
+    // Start a background WatchService that watches data/ folder for changes and reloads data
     private void startCategoryFileWatcher() {
         try {
             Path dataDir = Paths.get("data");
@@ -1089,6 +1089,14 @@ public class CustomerApp extends Application {
                                     } catch (Exception ex) {
                                         System.err.println("Failed to reload products: " + ex.getMessage());
                                     }
+                                } else if ("inventory.json".equals(name)) {
+                                    // Auto-reload inventory when Admin updates it
+                                    try {
+                                        Store.getInstance().reloadInventoryFromDisk();
+                                        System.out.println("[INFO] Inventory reloaded from disk automatically");
+                                    } catch (Exception ex) {
+                                        System.err.println("Failed to reload inventory: " + ex.getMessage());
+                                    }
                                 }
                                 continue;
                             }
@@ -1100,15 +1108,15 @@ public class CustomerApp extends Application {
                     } catch (ClosedWatchServiceException cwse) {
                         break;
                     } catch (Exception ex) {
-                        System.err.println("Category watcher error: " + ex.getMessage());
+                        System.err.println("File watcher error: " + ex.getMessage());
                         try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
                     }
                 }
-            }, "CategoryFileWatcher");
+            }, "DataFileWatcher");
             t.setDaemon(true);
             t.start();
         } catch (Exception ex) {
-            System.err.println("Category watcher failed to start: " + ex.getMessage());
+            System.err.println("File watcher failed to start: " + ex.getMessage());
         }
     }
     
@@ -3418,6 +3426,10 @@ public class CustomerApp extends Application {
 
         // Process payment and complete order
         try {
+            // Reload inventory from disk to get the latest data (in case Admin updated it)
+            store.reloadInventoryFromDisk();
+            store.reloadProductsFromDisk();
+            
             store.checkoutBasket(currentOrder);
             
             // Show success message
